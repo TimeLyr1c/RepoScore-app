@@ -81,10 +81,20 @@ final class ImportFlowTests: XCTestCase {
     }
     @MainActor
     private func assertPage(_ label: String, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        showControls(in: app)
         let indicator = app.staticTexts["pageIndicator"]
         let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: indicator)
         XCTAssertEqual(XCTWaiter.wait(for: [expected], timeout: 5), .completed,
                        "Expected page \(label)", file: file, line: line)
+    }
+
+    /// Tap and swipe page turns hide the reader controls; a center tap brings them back.
+    @MainActor
+    private func showControls(in app: XCUIApplication) {
+        let indicator = app.staticTexts["pageIndicator"]
+        guard !indicator.exists else { return }
+        app.otherElements["pdfSpread"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(indicator.waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -202,6 +212,27 @@ final class ImportFlowTests: XCTestCase {
         assertPage("3 / 5", in: app)
         XCUIDevice.shared.orientation = .portrait
         assertPage("3 / 5", in: app)
+    }
+
+    @MainActor
+    func testAutomaticLayoutShowsSpreadInLandscapeAndHidesControlsWhileReading() {
+        let app = seededApp(pages: 4)
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let score = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "UI-Test-Score")).firstMatch
+        XCTAssertTrue(score.waitForExistence(timeout: 10))
+        score.tap()
+        assertPage("1 / 4", in: app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        assertPage("1 / 4", in: app) // Cover stays alone by default.
+        app.otherElements["pdfSpread"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(app.staticTexts["pageIndicator"].waitForNonExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Full-screen landscape spread"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        assertPage("2–3 / 4", in: app)
+        XCUIDevice.shared.orientation = .portrait
+        assertPage("2 / 4", in: app)
     }
 
     @MainActor
