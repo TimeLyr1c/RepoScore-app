@@ -64,4 +64,11 @@ final class PageLayoutTests: XCTestCase {
         XCTAssertEqual(one.nextPage(from: 0), 0)
         XCTAssertEqual(one.previousPage(from: 0), 0)
     }
+
+    func testAutomaticPreferenceFollowsOrientation() {
+        XCTAssertEqual(ReadingPreference.automatic.mode(isLandscape: true), .double)
+        XCTAssertEqual(ReadingPreference.automatic.mode(isLandscape: false), .single)
+        XCTAssertEqual(ReadingPreference.single.mode(isLandscape: true), .single)
+        XCTAssertEqual(ReadingPreference.double.mode(isLandscape: false), .double)
+    }
 }

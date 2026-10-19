@@ -5,6 +5,21 @@ enum ReadingMode: String, CaseIterable {
     case double
 }
 
+/// The user's layout choice; automatic follows the current orientation.
+enum ReadingPreference: Hashable {
+    case automatic
+    case single
+    case double
+
+    func mode(isLandscape: Bool) -> ReadingMode {
+        switch self {
+        case .automatic: isLandscape ? .double : .single
+        case .single: .single
+        case .double: .double
+        }
+    }
+}
+
 /// Zero-based physical page ranges. The reading anchor remains stable across modes.
 struct PageLayout {
     let pageCount: Int

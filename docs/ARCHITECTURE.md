@@ -9,7 +9,7 @@ M2 已实现文件夹层级、重命名、乐谱移动与单双页阅读，保�
 - 原生 Swift / SwiftUI，Xcode 工程直接纳入版本控制，不引入工程生成器或第三方依赖。
 - 当前 deployment target 为 iPadOS 17.0，设备范围为 iPad，支持四种屏幕方向。最低版本是 bootstrap 技术选择，可在用户设备需求明确后调整。
 - 工程使用 Swift 5 language mode；本轮验证环境为 Xcode 27.0。
-- PDF 阅读使用系统 PDFKit。PageLayout 显式计算页组，UIViewRepresentable 包装最多两个单页 PDFView，统一处理左右点击、滑动与按钮翻页。见 [ADR 0004](decisions/0004-explicit-pdf-spreads.md)。
+- PDF 阅读使用系统 PDFKit。PageLayout 显式计算页组，UIViewRepresentable 包装最多两个单页 PDFView，按页面比例拼成一张贴合的页组并全屏显示，统一处理左右点击、滑动与按钮翻页。见 [ADR 0004](decisions/0004-explicit-pdf-spreads.md) 和 [ADR 0005](decisions/0005-full-screen-reader.md)。
 - 无后端、账户或网络服务。依据见 [ADR 0001](decisions/0001-native-ipad-foundation.md)。
 
 ## 工程结构

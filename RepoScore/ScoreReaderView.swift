@@ -7,9 +7,13 @@ struct ScoreReaderView: View {
     @State private var document: PDFDocument?
     @State private var loadFailed = false
     @State private var pageIndex = 0
-    @State private var mode: ReadingMode = .single
+    @State private var preference: ReadingPreference = .automatic
     @State private var separateCover = true
     @State private var showsSettings = false
+    @State private var showsControls = true
+    @State private var isLandscape = false
+
+    private var mode: ReadingMode { preference.mode(isLandscape: isLandscape) }
 
     private var layout: PageLayout {
         PageLayout(pageCount: document?.pageCount ?? score.pageCount, mode: mode, separateCover: separateCover)
@@ -24,28 +28,27 @@ struct ScoreReaderView: View {
     var body: some View {
         Group {
             if let document {
-                VStack(spacing: 0) {
-                    PDFSpreadView(document: document, pages: layout.spread(containing: pageIndex),
-                                  onPrevious: previousPage, onNext: nextPage)
-                    HStack {
-                        Button("上一页", systemImage: "chevron.left", action: previousPage)
-                            .disabled(layout.spread(containing: pageIndex).lowerBound == 0)
-                        Spacer()
-                        Text(pageLabel).monospacedDigit().foregroundStyle(.secondary)
-                            .accessibilityIdentifier("pageIndicator")
-                        Spacer()
-                        Button("下一页", systemImage: "chevron.right", action: nextPage)
-                            .disabled(layout.spread(containing: pageIndex).upperBound == layout.pageCount)
-                    }
-                    .padding().background(.regularMaterial)
-                }
+                // The page always lays out against the full screen; controls float above it.
+                PDFSpreadView(document: document, pages: layout.spread(containing: pageIndex),
+                              onPrevious: { turn(previousPage) }, onNext: { turn(nextPage) },
+                              onToggleControls: { withAnimation(.easeInOut(duration: 0.2)) { showsControls.toggle() } })
+                    .ignoresSafeArea()
             } else if loadFailed {
                 ContentUnavailableView("无法打开乐谱", systemImage: "doc.badge.ellipsis",
                                        description: Text("本地副本不存在或无法读取。请返回曲库，重新导入原文件。"))
             } else { ProgressView("正在打开乐谱…") }
         }
+        .overlay(alignment: .bottom) { if showsControls && document != nil { controls } }
+        .background { GeometryReader { proxy in
+            Color(uiColor: .systemBackground)
+                .onAppear { isLandscape = proxy.size.width > proxy.size.height }
+                .onChange(of: proxy.size) { _, size in isLandscape = size.width > size.height }
+        }.ignoresSafeArea() }
         .navigationTitle(score.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsControls || document == nil ? .visible : .hidden, for: .navigationBar)
+        .statusBarHidden(!showsControls && document != nil)
+        .persistentSystemOverlays(showsControls ? .automatic : .hidden)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("阅读设置", systemImage: "book") { showsSettings = true }
@@ -53,18 +56,19 @@ struct ScoreReaderView: View {
                     .popover(isPresented: $showsSettings) {
                         VStack(alignment: .leading, spacing: 20) {
                             Text("阅读设置").font(.headline)
-                            Picker("页面布局", selection: $mode) {
-                                Text("单页").tag(ReadingMode.single)
-                                Text("双页").tag(ReadingMode.double)
+                            Picker("页面布局", selection: $preference) {
+                                Text("自动").tag(ReadingPreference.automatic)
+                                Text("单页").tag(ReadingPreference.single)
+                                Text("双页").tag(ReadingPreference.double)
                             }
                             .pickerStyle(.segmented).accessibilityIdentifier("readingMode")
                             Toggle("第一页单独显示", isOn: $separateCover)
-                                .disabled(mode == .single).accessibilityIdentifier("separateCover")
-                            Text("左右边缘点击翻页，也可左右滑动；放大后以平移阅读为主。")
+                                .disabled(preference == .single).accessibilityIdentifier("separateCover")
+                            Text("自动：横屏双页，竖屏单页。点按中间显示或隐藏工具栏；左右边缘点击或左右滑动翻页，放大后以平移阅读为主。")
                                 .font(.footnote).foregroundStyle(.secondary)
                             Button("完成") { showsSettings = false }.frame(maxWidth: .infinity)
                         }
-                        .padding().frame(width: 300)
+                        .padding().frame(width: 320)
                     }
             }
         }
@@ -76,6 +80,30 @@ struct ScoreReaderView: View {
         }
     }
 
+    private var controls: some View {
+        HStack {
+            Button("上一页", systemImage: "chevron.left", action: previousPage)
+                .disabled(layout.spread(containing: pageIndex).lowerBound == 0)
+            Spacer()
+            Text(pageLabel).monospacedDigit().foregroundStyle(.secondary)
+                .accessibilityIdentifier("pageIndicator")
+            Spacer()
+            Button("下一页", systemImage: "chevron.right", action: nextPage)
+                .disabled(layout.spread(containing: pageIndex).upperBound == layout.pageCount)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+        .background(.regularMaterial, in: Capsule())
+        .frame(maxWidth: 480)
+        .padding(.horizontal).padding(.bottom, 12)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// Tap and swipe turns mean the reader is reading, so the controls get out of the way.
+    private func turn(_ action: () -> Void) {
+        action()
+        if showsControls { withAnimation(.easeInOut(duration: 0.2)) { showsControls = false } }
+    }
+
     private func previousPage() { pageIndex = layout.previousPage(from: pageIndex) }
     private func nextPage() { pageIndex = layout.nextPage(from: pageIndex) }
 }
@@ -85,12 +113,14 @@ private struct PDFSpreadView: UIViewRepresentable {
     let pages: Range<Int>
     let onPrevious: () -> Void
     let onNext: () -> Void
+    let onToggleControls: () -> Void
 
     func makeUIView(context: Context) -> SpreadPDFView { SpreadPDFView() }
 
     func updateUIView(_ view: SpreadPDFView, context: Context) {
         view.onPrevious = onPrevious
         view.onNext = onNext
+        view.onToggleControls = onToggleControls
         view.display(document: document, pages: pages)
     }
 
@@ -103,10 +133,10 @@ private struct PDFSpreadView: UIViewRepresentable {
 private final class SpreadPDFView: UIView, UIGestureRecognizerDelegate {
     var onPrevious: (() -> Void)?
     var onNext: (() -> Void)?
+    var onToggleControls: (() -> Void)?
     private var pageViews: [FittedPDFView] = []
     private var displayedPages: Range<Int> = 0..<0
     private weak var displayedDocument: PDFDocument?
-    private let stack = UIStackView()
     private weak var navigationBackGesture: UIGestureRecognizer?
     private var backGestureWasEnabled = true
     private weak var contentBackGesture: UIGestureRecognizer?
@@ -114,19 +144,9 @@ private final class SpreadPDFView: UIView, UIGestureRecognizerDelegate {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .secondarySystemBackground
+        // Matches the page paper in light mode, so the letterbox left by aspect fit reads as page.
+        backgroundColor = .systemBackground
         accessibilityIdentifier = "pdfSpread"
-        stack.axis = .horizontal
-        stack.spacing = 8
-        stack.distribution = .fillEqually
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
-        ])
         for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
             let swipe = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
             swipe.direction = direction
@@ -185,21 +205,34 @@ private final class SpreadPDFView: UIView, UIGestureRecognizerDelegate {
         guard displayedDocument !== document || displayedPages != pages else { return }
         displayedDocument = document
         displayedPages = pages
-        for view in pageViews {
-            stack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
+        pageViews.forEach { $0.removeFromSuperview() }
         pageViews = pages.compactMap { index in
             guard let page = document.page(at: index) else { return nil }
-            let view = FittedPDFView()
-            view.displayMode = .singlePage
-            view.autoScales = true
-            view.backgroundColor = .clear
+            let view = FittedPDFView(page: page)
             view.document = document
             view.go(to: page)
             view.accessibilityIdentifier = "pdfPage-\(index + 1)"
-            stack.addArrangedSubview(view)
+            addSubview(view)
             return view
+        }
+        setNeedsLayout()
+    }
+
+    /// Sizes the spread as one sheet: pages share a height, touch at the spine and fill the
+    /// container as far as the combined aspect ratio allows.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let sizes = pageViews.map(\.pageSize)
+        guard bounds.width > 0, bounds.height > 0, let height = sizes.map(\.height).max(), height > 0 else { return }
+        let widths = sizes.map { $0.width * height / max($0.height, 1) }
+        let total = widths.reduce(0, +)
+        guard total > 0 else { return }
+        let scale = min(bounds.width / total, bounds.height / height)
+        var x = (bounds.width - total * scale) / 2
+        let y = (bounds.height - height * scale) / 2
+        for (view, width) in zip(pageViews, widths) {
+            view.frame = CGRect(x: x, y: y, width: width * scale, height: height * scale)
+            x += width * scale
         }
     }
 
@@ -208,7 +241,8 @@ private final class SpreadPDFView: UIView, UIGestureRecognizerDelegate {
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if let tap = gestureRecognizer as? UITapGestureRecognizer, tap.numberOfTapsRequired == 2 { return true }
+        // Taps always begin so the center can reveal controls while zoomed; edge taps check scale.
+        if gestureRecognizer is UITapGestureRecognizer { return true }
         return isAtFitScale
     }
 
@@ -224,18 +258,42 @@ private final class SpreadPDFView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func tapped(_ gesture: UITapGestureRecognizer) {
         let x = gesture.location(in: self).x
+        let isEdge = x < bounds.width * 0.25 || x > bounds.width * 0.75
+        if isEdge && !isAtFitScale { return }
         if x < bounds.width * 0.25 { onPrevious?() }
         else if x > bounds.width * 0.75 { onNext?() }
+        else { onToggleControls?() }
     }
 
     @objc private func ignoreDoubleTap() {}
 }
 
 private final class FittedPDFView: PDFView {
+    /// Displayed page size in points, accounting for the page's rotation.
+    let pageSize: CGSize
     private var previousSize: CGSize = .zero
+
+    init(page: PDFPage) {
+        let box = page.bounds(for: .cropBox).size
+        pageSize = page.rotation % 180 == 0 ? box : CGSize(width: box.height, height: box.width)
+        super.init(frame: .zero)
+        displayMode = .singlePage
+        autoScales = true
+        // No gray page-break gutter or shadow: the view is sized to the page, so it fits edge to edge.
+        displaysPageBreaks = false
+        pageShadowsEnabled = false
+        pageBreakMargins = .zero
+        backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // The reader ignores safe areas; keep PDFKit's scroll view from insetting the page.
+        for case let scroll as UIScrollView in subviews where scroll.contentInsetAdjustmentBehavior != .never {
+            scroll.contentInsetAdjustmentBehavior = .never
+        }
         if bounds.size != previousSize && bounds.width > 0 && bounds.height > 0 {
             previousSize = bounds.size
             // Rotation changes scale, never the selected physical page.
